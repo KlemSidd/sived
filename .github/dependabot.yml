@@ -8,3 +8,9 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # The application is Python 3.12. Digest updates for that tag still open.
+      - dependency-name: "python"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
