@@ -24,7 +24,7 @@ This build does not have staff passwords or authenticator codes yet. The sign-in
 
 ## Stand the desk up
 
-The Deploy section of the [README](../README.md) is the checklist. The machine needs Python 3.12 and no extra packages. `python -m app web` serves the site. `python -m app work` takes one queued manuscript and exits. Pick one HTTPS path before an editor registers Patreon: certificate files, Let's Encrypt, or a proxy that terminates TLS.
+The Deploy section of the [README](../README.md) is the checklist. The machine needs Python 3.15 and no extra packages. `python -m app web` serves the site. `python -m app work` takes one queued manuscript and exits. Pick one HTTPS path before an editor registers Patreon: certificate files, Let's Encrypt, or a proxy that terminates TLS.
 
 `python -m app bootstrap` creates `owner@example.com` when `DEV_LOGIN` and `DEMO_MODE` are unset. The sign-in page then has no account list. Sign in once with `DEV_LOGIN=1` on `127.0.0.1`, then restart without that flag. The session lasts 7 days. Do not leave either flag on a listener other people can open. Either one skips the Patreon check.
 

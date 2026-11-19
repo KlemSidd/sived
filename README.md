@@ -23,7 +23,7 @@ Earlier designs sit in `local-docs/` on the machine that keeps them. They are no
 
 ### What has to be on the machine
 
-- Python 3.12. The desk uses the standard library only. Do not install packages.
+- Python 3.15. The desk uses the standard library only. Do not install packages.
 - `openssl` on `PATH` when the desk requests a Let's Encrypt certificate.
 - `pdftotext` if authors will upload PDF. Without it, a PDF the built-in reader cannot parse is refused.
 - LibreOffice `soffice` if authors will upload legacy `.doc`. Without it, the desk asks for `.docx`.

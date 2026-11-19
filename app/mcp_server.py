@@ -1195,7 +1195,7 @@ def _deployment(conn, user) -> dict:
             "local-docs/",
         ],
         "requirements": {
-            "python": "3.12",
+            "python": "3.15",
             "packages": "stdlib only",
             "openssl": "required for Let's Encrypt",
             "pdftotext": "optional, for PDF text",
