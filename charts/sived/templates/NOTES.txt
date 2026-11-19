@@ -1,0 +1,35 @@
+The desk is one pod. SQLite is the file on the volume at /data.
+{{- if eq .Values.worker.mode "sidecar" }}
+The worker container runs one queued manuscript, then sleeps {{ .Values.worker.interval }} seconds.
+{{- else if eq .Values.worker.mode "cronjob" }}
+The worker is a CronJob on {{ .Values.worker.schedule }}. It stays on the web pod's node.
+{{- else }}
+The chart does not run the worker. Run `python -m app work` when a manuscript is queued.
+{{- end }}
+
+{{- if .Values.ingress.enabled }}
+
+Open https://{{ (index .Values.ingress.hosts 0).host }}/
+{{- else if .Values.gateway.enabled }}
+
+The HTTPRoute names {{ index .Values.gateway.hostnames 0 }}.
+{{- else }}
+
+No Ingress is set. Forward the Service:
+
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "sived.fullname" . }} 8080:{{ .Values.service.port }}
+{{- end }}
+
+{{- if not .Values.persistence.enabled }}
+
+persistence.enabled is false. The data directory is an emptyDir and goes away with the pod.
+{{- else if not .Values.persistence.retain }}
+
+helm uninstall deletes the volume. persistence.retain leaves it, and the next install uses persistence.existingClaim.
+{{- end }}
+
+Ingress, cert-manager, a Gateway route, a network policy, and an external secret stay off until those values are set. This chart does not install those controllers.
+{{- if .Values.podDisruptionBudget.enabled }}
+
+podDisruptionBudget is on. With one replica, minAvailable 1 blocks draining that pod.
+{{- end }}

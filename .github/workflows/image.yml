@@ -1,0 +1,20 @@
+name: image
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+permissions:
+  contents: read
+  packages: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Build and push
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          image="ghcr.io/klemsidd/sived:${version}"
+          docker build -t "$image" .
+          docker push "$image"

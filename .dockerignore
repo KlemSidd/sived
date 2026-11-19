@@ -1,0 +1,15 @@
+.git
+.github
+.grok
+.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+data
+**/*.sqlite
+audit.log
+logs
+local-docs
+tests
+charts
+*.tgz

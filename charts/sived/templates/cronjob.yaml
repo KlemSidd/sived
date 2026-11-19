@@ -1,0 +1,75 @@
+{{- if eq .Values.worker.mode "cronjob" }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "sived.fullname" . }}-work
+  labels:
+    {{- include "sived.labels" . | nindent 4 }}
+    app.kubernetes.io/component: work
+spec:
+  schedule: {{ .Values.worker.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: {{ .Values.worker.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.worker.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      backoffLimit: {{ .Values.worker.backoffLimit }}
+      template:
+        metadata:
+          labels:
+            {{- include "sived.labels" . | nindent 12 }}
+            app.kubernetes.io/component: work
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: {{ include "sived.serviceAccountName" . }}
+          automountServiceAccountToken: {{ .Values.serviceAccount.automount }}
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            {{- toYaml .Values.podSecurityContext | nindent 12 }}
+          containers:
+            - name: worker
+              image: {{ include "sived.image" . | quote }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  {{- include "sived.workerOnce" . | nindent 18 }}
+              env:
+                {{- include "sived.env" . | nindent 16 }}
+              {{- with .Values.extraEnvFrom }}
+              envFrom:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              volumeMounts:
+                {{- include "sived.volumeMounts" . | nindent 16 }}
+              securityContext:
+                {{- toYaml .Values.securityContext | nindent 16 }}
+              {{- with .Values.worker.resources }}
+              resources:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+          volumes:
+            {{- include "sived.volumes" . | nindent 12 }}
+          {{- with .Values.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          affinity:
+            {{- if .Values.worker.affinity }}
+            {{- toYaml .Values.worker.affinity | nindent 12 }}
+            {{- else }}
+            podAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchLabels:
+                      {{- include "sived.selectorLabels" . | nindent 22 }}
+                  topologyKey: kubernetes.io/hostname
+            {{- end }}
+{{- end }}

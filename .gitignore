@@ -1,0 +1,8 @@
+__pycache__/
+.pytest_cache/
+data/
+*.sqlite
+.venv/
+audit.log
+logs/
+local-docs/

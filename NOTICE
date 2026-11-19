@@ -1,0 +1,13 @@
+SIVED
+Copyright (c) 2026 KlemSidd LLC
+
+The Python application and the documentation in this repository are under the MIT license in the file LICENSE.
+
+The container image installs Debian packages and runs them as separate programs:
+
+- ca-certificates
+- openssl
+- poppler-utils, used as pdftotext
+- libreoffice-writer, only when the image is built with INSTALL_SOFFICE=1
+
+Those packages keep the licenses and copyright files Debian ships with them. Their source is the corresponding Debian source package. The image does not relicense them.

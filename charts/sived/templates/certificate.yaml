@@ -1,0 +1,34 @@
+{{- if and .Values.certManager.enabled .Values.certManager.certificate.enabled }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "sived.fullname" . }}
+  labels:
+    {{- include "sived.labels" . | nindent 4 }}
+spec:
+  secretName: {{ include "sived.tlsSecretName" . }}
+  {{- if .Values.certManager.certificate.duration }}
+  duration: {{ .Values.certManager.certificate.duration | quote }}
+  {{- end }}
+  {{- if .Values.certManager.certificate.renewBefore }}
+  renewBefore: {{ .Values.certManager.certificate.renewBefore | quote }}
+  {{- end }}
+  dnsNames:
+    {{- if .Values.certManager.certificate.dnsNames }}
+    {{- toYaml .Values.certManager.certificate.dnsNames | nindent 4 }}
+    {{- else if .Values.ingress.hosts }}
+    {{- range .Values.ingress.hosts }}
+    - {{ .host | quote }}
+    {{- end }}
+    {{- else }}
+    {{- range .Values.gateway.hostnames }}
+    - {{ . | quote }}
+    {{- end }}
+    {{- end }}
+  issuerRef:
+    name: {{ .Values.certManager.issuer }}
+    kind: {{ .Values.certManager.issuerKind }}
+  privateKey:
+    algorithm: {{ .Values.certManager.certificate.privateKey.algorithm }}
+    size: {{ .Values.certManager.certificate.privateKey.size }}
+{{- end }}

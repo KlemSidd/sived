@@ -1,0 +1,57 @@
+{{- if .Values.ingress.enabled }}
+{{- $ann := dict }}
+{{- if .Values.certManager.enabled }}
+{{- if eq .Values.certManager.issuerKind "Issuer" }}
+{{- $_ := set $ann "cert-manager.io/issuer" .Values.certManager.issuer }}
+{{- else }}
+{{- $_ := set $ann "cert-manager.io/cluster-issuer" .Values.certManager.issuer }}
+{{- end }}
+{{- end }}
+{{- range $key, $value := .Values.ingress.annotations }}
+{{- $_ := set $ann $key (toString $value) }}
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "sived.fullname" . }}
+  labels:
+    {{- include "sived.labels" . | nindent 4 }}
+  {{- if $ann }}
+  annotations:
+    {{- toYaml $ann | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . | quote }}
+  {{- end }}
+  {{- if .Values.ingress.tls }}
+  tls:
+    {{- toYaml .Values.ingress.tls | nindent 4 }}
+  {{- else if .Values.certManager.enabled }}
+  tls:
+    - secretName: {{ include "sived.tlsSecretName" . }}
+      hosts:
+        {{- range .Values.ingress.hosts }}
+        - {{ .host | quote }}
+        {{- end }}
+  {{- end }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- $paths := .paths }}
+          {{- if not $paths }}
+          {{- $paths = list (dict "path" "/" "pathType" "Prefix") }}
+          {{- end }}
+          {{- range $paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType }}
+            backend:
+              service:
+                name: {{ include "sived.fullname" $ }}
+                port:
+                  number: {{ $.Values.service.port }}
+          {{- end }}
+    {{- end }}
+{{- end }}

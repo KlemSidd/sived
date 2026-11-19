@@ -1,0 +1,236 @@
+# One pod. The volume at /data is the data directory. The desk opens
+# SQLite there. It does not read DATABASE_URL and it does not open Postgres.
+# extraManifests can apply another operator's objects. The desk does not
+# connect to them.
+
+replicaCount: 1
+
+image:
+  # Local tag from `docker build -t sived:0.1.0 .` when tag is empty.
+  # A version tag publishes ghcr.io/klemsidd/sived:<version>.
+  # Set repository to that path when the cluster pulls the image.
+  repository: sived
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  automount: false
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  fsGroupChangePolicy: OnRootMismatch
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+  seccompProfile:
+    type: RuntimeDefault
+
+service:
+  type: ClusterIP
+  port: 80
+  nodePort: null
+  annotations: {}
+  loadBalancerSourceRanges: []
+
+# Off until you set it. The chart does not install an ingress controller.
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts: []
+  # - host: desk.example.com
+  #   paths:
+  #     - path: /
+  #       pathType: Prefix
+  tls: []
+  # - secretName: sived-tls
+  #   hosts:
+  #     - desk.example.com
+
+# Off until you set it. The chart does not install a Gateway controller.
+gateway:
+  enabled: false
+  parentRefs: []
+  # - name: public
+  #   namespace: gateway
+  hostnames: []
+  # - desk.example.com
+
+# Off until you set it. The chart does not install cert-manager.
+# issuerKind is ClusterIssuer or Issuer. The named issuer must already exist.
+# Ingress receives the cert-manager annotation. A Gateway uses certificate below.
+certManager:
+  enabled: false
+  issuer: ""
+  issuerKind: ClusterIssuer
+  certificate:
+    enabled: false
+    secretName: ""
+    duration: ""
+    renewBefore: ""
+    dnsNames: []
+    privateKey:
+      algorithm: ECDSA
+      size: 256
+
+# Mount a TLS secret into the process. Prefer ingress or gateway TLS.
+# The kubelet calls the pod IP, and that name is not on a public certificate.
+# probes.scheme TCP is the probe that still passes with this mount.
+tls:
+  existingSecret: ""
+  certKey: tls.crt
+  keyKey: tls.key
+
+# The data directory. existingClaim uses a volume you already created.
+# storageClass "-" sets an empty storageClassName. Uninstall deletes this
+# claim unless retain is true. A kept claim is then persistence.existingClaim.
+persistence:
+  enabled: true
+  existingClaim: ""
+  storageClass: ""
+  size: 10Gi
+  accessModes:
+    - ReadWriteOnce
+  annotations: {}
+  retain: false
+
+# sidecar runs python -m app work in the web pod, then sleeps.
+# cronjob runs that command on a schedule on the same node as the volume.
+# off leaves the queue to you. cronjob needs the persistent claim.
+worker:
+  mode: sidecar
+  interval: 15
+  databaseFile: /data/editting.sqlite
+  schedule: "*/1 * * * *"
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  backoffLimit: 1
+  # Empty keeps the CronJob on the web pod's node. A value replaces that rule.
+  affinity: {}
+  resources: {}
+
+# Creates owner@example.com when the account is missing. Idempotent.
+# Off by default. DEV_LOGIN and DEMO_MODE already seed from the web process.
+bootstrap:
+  enabled: false
+
+env:
+  devLogin: "0"
+  demoMode: "0"
+  # Empty is 1 when ingress or gateway is on, and 0 otherwise.
+  trustProxy: ""
+  llmProvider: xai
+  xaiModel: grok-4.3
+  xaiBaseUrl: https://api.x.ai/v1
+  xaiMode: local
+  llmMode: ""
+  llmModel: ""
+  llmBaseUrl: ""
+  llmTimeout: ""
+  acmeDomain: ""
+  acmeEmail: ""
+  acmeStaging: "0"
+  acmeDirectory: ""
+  # Empty with acmeDomain becomes 0. This user cannot bind port 80.
+  # The Service port forwards to the desk port.
+  acmeHttpPort: ""
+  patreonRedirectUri: ""
+  dailyStopMicros: ""
+
+# One source for the env secret. externalSecret wins over existingSecret.
+# Inline keys are used only when both of those are off. An empty secret is
+# not created. XAI_API_KEY and LLM_API_KEY are not written into the database.
+secrets:
+  existingSecret: ""
+  xaiApiKey: ""
+  llmApiKey: ""
+  extra: {}
+  # Key names to mount when the secret is external or already exists.
+  extraKeys: []
+
+# Off until you set it. The chart does not install External Secrets.
+# data entries are copied onto the ExternalSecret. apiVersion external-secrets.io/v1.
+externalSecret:
+  enabled: false
+  refreshInterval: 1h
+  secretStoreRef:
+    name: ""
+    kind: ClusterSecretStore
+  target:
+    name: ""
+  data: []
+  # - secretKey: XAI_API_KEY
+  #   remoteRef:
+  #     key: sived
+  #     property: XAI_API_KEY
+  dataFrom: []
+
+extraEnv: []
+extraEnvFrom: []
+extraVolumes: []
+extraVolumeMounts: []
+
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+priorityClassName: ""
+
+# Recreate is required. A second pod on this volume locks or splits SQLite.
+strategy:
+  type: Recreate
+
+probes:
+  # Empty is HTTP, or HTTPS when tls.existingSecret is set.
+  scheme: ""
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 3
+  startupPeriodSeconds: 2
+  startupFailureThreshold: 30
+
+# Off until you set it. Empty ingressFrom allows pods in this namespace.
+# allowAllEgress true allows every outbound connection. False allows DNS,
+# plus the rules in egress.
+networkPolicy:
+  enabled: false
+  ingressFrom: []
+  allowAllEgress: true
+  egress: []
+
+# Off until you set it. minAvailable 1 on the only replica blocks draining that pod.
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+  maxUnavailable: ""
+
+# Off until you set it. The chart does not install Stakater Reloader.
+# Turn it on when an external secret changes and the pod should restart.
+reloader:
+  enabled: false
+
+# Rendered with the release as the template root. A namespaced object should
+# set metadata.namespace to "{{ .Release.Namespace }}". The desk does not
+# connect to a database, queue, or issuer you add here.
+extraManifests: []

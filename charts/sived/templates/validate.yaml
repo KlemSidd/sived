@@ -1,0 +1,76 @@
+{{- if gt (int .Values.replicaCount) 1 }}
+{{- fail "replicaCount stays at 1. A second pod opens the same SQLite file." }}
+{{- end }}
+{{- if ne .Values.strategy.type "Recreate" }}
+{{- fail "strategy.type stays Recreate. A rolling update starts a second pod on the same volume." }}
+{{- end }}
+{{- $mode := .Values.worker.mode }}
+{{- if not (or (eq $mode "sidecar") (eq $mode "cronjob") (eq $mode "off")) }}
+{{- fail "worker.mode is sidecar, cronjob, or off" }}
+{{- end }}
+{{- if and (eq $mode "cronjob") (not .Values.persistence.enabled) }}
+{{- fail "worker.mode cronjob needs persistence.enabled. An emptyDir stays in the web pod." }}
+{{- end }}
+{{- if and .Values.ingress.enabled (not .Values.ingress.hosts) }}
+{{- fail "ingress.enabled needs ingress.hosts" }}
+{{- end }}
+{{- if and .Values.gateway.enabled (not .Values.gateway.parentRefs) }}
+{{- fail "gateway.enabled needs gateway.parentRefs" }}
+{{- end }}
+{{- if and .Values.gateway.enabled (not .Values.gateway.hostnames) }}
+{{- fail "gateway.enabled needs gateway.hostnames" }}
+{{- end }}
+{{- if .Values.certManager.enabled }}
+{{- if not .Values.certManager.issuer }}
+{{- fail "certManager.enabled needs certManager.issuer" }}
+{{- end }}
+{{- if not (or (eq .Values.certManager.issuerKind "ClusterIssuer") (eq .Values.certManager.issuerKind "Issuer")) }}
+{{- fail "certManager.issuerKind is ClusterIssuer or Issuer" }}
+{{- end }}
+{{- if and (not .Values.ingress.enabled) (not .Values.certManager.certificate.enabled) }}
+{{- fail "certManager.enabled needs ingress.enabled or certManager.certificate.enabled" }}
+{{- end }}
+{{- if and .Values.certManager.certificate.enabled (not .Values.certManager.certificate.dnsNames) (not .Values.ingress.hosts) (not .Values.gateway.hostnames) }}
+{{- fail "certManager.certificate needs dnsNames, ingress.hosts, or gateway.hostnames" }}
+{{- end }}
+{{- end }}
+{{- if .Values.externalSecret.enabled }}
+{{- if .Values.secrets.existingSecret }}
+{{- fail "externalSecret.enabled and secrets.existingSecret are both set. Use one." }}
+{{- end }}
+{{- if or .Values.secrets.xaiApiKey .Values.secrets.llmApiKey .Values.secrets.extra }}
+{{- fail "externalSecret.enabled leaves the inline secret keys unused. Put them in the store." }}
+{{- end }}
+{{- if not .Values.externalSecret.secretStoreRef.name }}
+{{- fail "externalSecret.enabled needs externalSecret.secretStoreRef.name" }}
+{{- end }}
+{{- if and (not .Values.externalSecret.data) (not .Values.externalSecret.dataFrom) }}
+{{- fail "externalSecret.enabled needs externalSecret.data or externalSecret.dataFrom" }}
+{{- end }}
+{{- end }}
+{{- if and .Values.secrets.existingSecret (or .Values.secrets.xaiApiKey .Values.secrets.llmApiKey .Values.secrets.extra) }}
+{{- fail "secrets.existingSecret leaves the inline secret keys unused. Use one source." }}
+{{- end }}
+{{- if or (hasKey .Values.secrets.extra "XAI_API_KEY") (hasKey .Values.secrets.extra "LLM_API_KEY") }}
+{{- fail "Put XAI_API_KEY in secrets.xaiApiKey and LLM_API_KEY in secrets.llmApiKey." }}
+{{- end }}
+{{- if and .Values.env.acmeDomain (not .Values.env.acmeEmail) }}
+{{- fail "env.acmeDomain needs env.acmeEmail" }}
+{{- end }}
+{{- $scheme := .Values.probes.scheme }}
+{{- if and $scheme (not (or (eq $scheme "HTTP") (eq $scheme "HTTPS") (eq $scheme "TCP"))) }}
+{{- fail "probes.scheme is HTTP, HTTPS, or TCP" }}
+{{- end }}
+{{- if .Values.podDisruptionBudget.enabled }}
+{{- $min := .Values.podDisruptionBudget.minAvailable }}
+{{- $max := .Values.podDisruptionBudget.maxUnavailable }}
+{{- if and (ne (toString $min) "") (ne (toString $max) "") }}
+{{- fail "podDisruptionBudget uses minAvailable or maxUnavailable" }}
+{{- end }}
+{{- if and (eq (toString $min) "") (eq (toString $max) "") }}
+{{- fail "podDisruptionBudget.enabled needs minAvailable or maxUnavailable" }}
+{{- end }}
+{{- end }}
+{{- if and .Values.persistence.enabled (not .Values.persistence.existingClaim) (not .Values.persistence.accessModes) }}
+{{- fail "persistence.accessModes needs an entry, or set persistence.existingClaim" }}
+{{- end }}
