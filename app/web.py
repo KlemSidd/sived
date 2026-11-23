@@ -111,6 +111,10 @@ def esc(value) -> str:
     return html.escape("" if value is None else str(value))
 
 
+def _header_value(value) -> str:
+    return str("" if value is None else value).replace("\n", "").replace("\r", "")
+
+
 def _model_cost(micros) -> str:
     return usd(micros_to_cents(int(micros or 0)))
 
@@ -894,7 +898,7 @@ class App(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/html; charset=utf-8")
         _hsts(self)
         for key, value in headers:
-            self.send_header(key, value)
+            self.send_header(key, _header_value(value))
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -3738,7 +3742,7 @@ def _send_bytes(handler, status: int, body: bytes, content_type: str, extra=None
     _hsts(handler)
     handler.send_header("Content-Length", str(len(body)))
     for key, value in extra or []:
-        handler.send_header(key, value)
+        handler.send_header(key, _header_value(value))
     handler.end_headers()
     if body:
         handler.wfile.write(body)

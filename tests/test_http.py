@@ -12,6 +12,7 @@ import unittest
 import zipfile
 from http.client import HTTPConnection
 from pathlib import Path
+from unittest.mock import patch
 from urllib.parse import urlencode
 
 os.environ.setdefault("DEV_LOGIN", "1")
@@ -139,6 +140,18 @@ class HttpFlowTests(unittest.TestCase):
 
     def client(self) -> Client:
         return Client(self.port)
+
+    def test_a_response_header_cannot_add_another_header(self):
+        with patch(
+            "app.web.route",
+            return_value=(204, b"", [("Location", "ok\r\nX-Injected: yes")]),
+        ):
+            conn = HTTPConnection("127.0.0.1", self.port, timeout=10)
+            conn.request("GET", "/login")
+            resp = conn.getresponse()
+            resp.read()
+        self.assertIsNone(resp.getheader("X-Injected"))
+        self.assertEqual(resp.getheader("Location"), "okX-Injected: yes")
 
     def sign_in(self, email: str) -> tuple[Client, str, str]:
         client = self.client()
