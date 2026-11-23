@@ -2,12 +2,16 @@
 
 import io
 import json
+import socket
 import sqlite3
 import tempfile
+import threading
 import unittest
 import urllib.error
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import urlsplit
 
 from app import config, llm
 from app.db import open_db
@@ -192,7 +196,7 @@ class InferenceRoutingTests(unittest.TestCase):
             )
 
         account = llm.prepare_account(provider="anthropic", base_url="", secret="anthropic-key")
-        with patch("app.llm.urllib.request.urlopen", boom):
+        with patch("app.llm._response", boom):
             with self.assertRaises(ValueError) as caught:
                 llm.probe_models(account)
         self.assertEqual(str(caught.exception), "that provider refused the credential")
@@ -215,6 +219,65 @@ class InferenceRoutingTests(unittest.TestCase):
                 base_url="http://user:pass@127.0.0.1:8000/v1",
                 secret="",
             )
+
+    def test_a_metadata_address_is_refused_and_a_lan_address_is_kept(self):
+        for base_url in (
+            "http://169.254.169.254/latest",
+            "http://metadata.google.internal/computeMetadata/v1",
+            "http://2130706433/",
+            "http://100.100.100.200/",
+        ):
+            with self.assertRaises(ValueError) as caught:
+                llm.prepare_account(provider="compatible", base_url=base_url, secret="")
+            self.assertEqual(str(caught.exception), "that provider address is not allowed")
+        account = llm.prepare_account(
+            provider="compatible",
+            base_url="http://10.1.2.3:11434/v1",
+            secret="",
+        )
+        self.assertEqual(account["base"], "http://10.1.2.3:11434/v1")
+
+    def test_a_hostname_that_resolves_to_a_link_local_address_is_refused(self):
+        def fake_getaddrinfo(host, *args, **kwargs):
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("169.254.169.254", 0))]
+
+        with patch("app.llm.socket.getaddrinfo", fake_getaddrinfo):
+            with self.assertRaises(ValueError) as caught:
+                llm._get("https://models.example/v1/models", {}, 5)
+        self.assertEqual(str(caught.exception), "that provider address is not allowed")
+
+    def test_a_redirect_is_not_followed(self):
+        seen = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                seen.append(self.path)
+                self.send_response(302)
+                self.send_header("Location", "http://169.254.169.254/latest/meta-data/")
+                self.end_headers()
+
+            def log_message(self, fmt, *args):
+                return
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            port = server.server_address[1]
+            with self.assertRaises(ValueError) as caught:
+                llm.probe_models(
+                    {
+                        "style": "openai",
+                        "base": f"http://127.0.0.1:{port}/v1",
+                        "key": "",
+                        "timeout": 5,
+                    }
+                )
+            self.assertEqual(str(caught.exception), "that provider could not be reached")
+            self.assertEqual(seen, ["/v1/models"])
+        finally:
+            server.shutdown()
+            server.server_close()
 
 class InferenceRunTests(unittest.TestCase):
     def setUp(self):
@@ -325,9 +388,9 @@ class InferenceRunTests(unittest.TestCase):
         posts = []
 
         def fake_get(url, headers, timeout):
-            if "api.openai.com" in url:
+            if urlsplit(url).hostname == "api.openai.com":
                 return _models(["grok-4.3"])
-            if "openrouter.ai" in url:
+            if urlsplit(url).hostname == "openrouter.ai":
                 return _models(["other/grok-4.3", "x-ai/grok-4.3"])
             raise AssertionError(url)
 
@@ -335,7 +398,7 @@ class InferenceRunTests(unittest.TestCase):
             posts.append((url, body["model"]))
             self.assertNotIn("openai-key", url)
             self.assertNotIn("router-key", body["messages"][0]["content"])
-            if "api.openai.com" in url:
+            if urlsplit(url).hostname == "api.openai.com":
                 raise RuntimeError("the model service refused the call")
             return {
                 "choices": [{"message": {"content": "The promise is late.\n"}}],
@@ -434,7 +497,7 @@ class InferenceRunTests(unittest.TestCase):
         posts = []
 
         def fake_get(url, headers, timeout):
-            if "11434" in url:
+            if urlsplit(url).port == 11434:
                 return {"data": [{"id": "grok-4.3"}, {"id": "llama3.2"}]}
             return catalog
 

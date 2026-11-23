@@ -7,8 +7,10 @@ endpoint. The key stays in the environment.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import re
+import socket
 import urllib.error
 import urllib.request
 from decimal import Decimal, InvalidOperation
@@ -36,6 +38,27 @@ NAMES = tuple(PROVIDERS)
 # Letters, digits, and the punctuation a vendor puts in a model id.
 MODEL_RE = re.compile(r"^[A-Za-z0-9._:/\-+]{1,160}$")
 _LABEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{0,39}$")
+# http(s), a host, an optional port, a path, and an optional query. No userinfo or fragment.
+_BASE_RE = re.compile(
+    r"https?://"
+    r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*"
+    r"|\[[0-9A-Fa-f:]+\])"
+    r"(?::[0-9]{1,5})?"
+    r"(?:/[A-Za-z0-9._~!$&'()*+,;=:%/-]*)?"
+    r"(?:\?[A-Za-z0-9._~!$&'()*+,;=:%/?-]*)?"
+)
+_METADATA_HOSTS = frozenset({
+    "metadata",
+    "metadata.google.internal",
+    "metadata.google.com",
+    "instance-data",
+})
+_METADATA_ADDRESSES = frozenset({
+    ipaddress.ip_address("169.254.169.254"),
+    ipaddress.ip_address("100.100.100.200"),
+    ipaddress.ip_address("fd00:ec2::254"),
+})
 DEFAULT_LIMIT = 20
 # Dollars per token, times this, is integer micros per million tokens.
 _MICROS_PER_MILLION = Decimal("1000000000000")
@@ -167,14 +190,104 @@ def _base(provider: str, spec: dict) -> str:
     return ""
 
 
+def _blocked_address(addr) -> bool:
+    mapped = getattr(addr, "ipv4_mapped", None)
+    if mapped is not None:
+        addr = mapped
+    if addr in _METADATA_ADDRESSES:
+        return True
+    return bool(
+        addr.is_link_local or addr.is_multicast or addr.is_reserved or addr.is_unspecified
+    )
+
+
+def _blocked_host(host: str) -> bool:
+    """Link-local and metadata targets are refused.
+
+    Loopback and private LAN addresses stay open. Ollama and a compatible
+    server on the operator's own machine use them.
+    """
+    name = (host or "").lower().rstrip(".")
+    if not name or name in _METADATA_HOSTS or name.endswith(".metadata.google.internal"):
+        return True
+    if name.startswith("0x"):
+        return True
+    labels = name.split(".")
+    if all(label.isdigit() for label in labels):
+        if len(labels) != 4 or any(len(label) > 1 and label.startswith("0") for label in labels):
+            return True
+    try:
+        addr = ipaddress.ip_address(name)
+    except ValueError:
+        return False
+    return _blocked_address(addr)
+
+
 def _clean(url: str) -> str:
     url = (url or "").strip().rstrip("/")
     parts = urlsplit(url)
-    if parts.scheme not in ("http", "https") or not parts.hostname:
+    if parts.scheme in ("http", "https") and not url.startswith(parts.scheme + "://"):
+        split = url.split("://", 1)
+        if len(split) == 2:
+            url = parts.scheme + "://" + split[1]
+    if _BASE_RE.fullmatch(url) is None:
         return ""
-    if parts.username or parts.password:
+    parts = urlsplit(url)
+    host = parts.hostname or ""
+    try:
+        port = parts.port
+    except ValueError:
+        return ""
+    if not host or parts.username or parts.password or _blocked_host(host):
+        return ""
+    if port is not None and not 1 <= port <= 65535:
         return ""
     return url
+
+
+def _allowed_target(url: str) -> bool:
+    if not _clean(url):
+        return False
+    host = urlsplit(url).hostname or ""
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        pass
+    else:
+        return True
+    try:
+        infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    except socket.gaierror:
+        return False
+    if not infos:
+        return False
+    for info in infos:
+        ip = info[4][0].split("%", 1)[0]
+        try:
+            addr = ipaddress.ip_address(ip)
+        except ValueError:
+            return False
+        if _blocked_address(addr):
+            return False
+    return True
+
+
+class _AddressRejected(Exception):
+    pass
+
+
+class _RefuseRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(req.full_url, code, msg, headers, fp)
+
+
+_OPENER = urllib.request.build_opener(_RefuseRedirect)
+
+
+def _response(req, timeout):
+    if not _allowed_target(req.full_url):
+        raise _AddressRejected()
+    return _OPENER.open(req, timeout=timeout)
 
 
 def _timeout(provider: str) -> int:
@@ -194,9 +307,12 @@ def _post(url: str, headers: dict, body: dict, timeout: int) -> dict:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _response(req, timeout) as resp:
             raw = resp.read()
-    except urllib.error.HTTPError:
+    except _AddressRejected:
+        raise RuntimeError("the model service address is not allowed") from None
+    except urllib.error.HTTPError as exc:
+        exc.close()
         raise RuntimeError("the model service refused the call") from None
     except (TimeoutError, urllib.error.URLError, OSError):
         raise RuntimeError("the model service could not be reached") from None
@@ -227,6 +343,9 @@ def prepare_account(*, provider: str, base_url: str, secret: str, saved_secret: 
         raise ValueError("an API key is required")
     base = _account_base(name, base_url)
     if not base:
+        host = (urlsplit(base_url or "").hostname or "")
+        if host and _blocked_host(host):
+            raise ValueError("that provider address is not allowed")
         raise ValueError("set the base URL to an http or https host with no password in the URL")
     return {
         "provider": name,
@@ -545,10 +664,14 @@ def _list_headers(account: dict) -> dict:
 def _get(url: str, headers: dict, timeout: int) -> dict:
     req = urllib.request.Request(url, headers=headers, method="GET")
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _response(req, timeout) as resp:
             raw = resp.read()
+    except _AddressRejected:
+        raise ValueError("that provider address is not allowed") from None
     except urllib.error.HTTPError as exc:
-        if exc.code in (401, 403):
+        code = exc.code
+        exc.close()
+        if code in (401, 403):
             raise ValueError("that provider refused the credential") from None
         raise ValueError("that provider could not be reached") from None
     except (TimeoutError, urllib.error.URLError, OSError):
